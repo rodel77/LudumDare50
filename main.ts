@@ -33,22 +33,34 @@ enum Interest {
     TRIANGLE,
 };
 
-function randomEnum<T>(anEnum: T): T[keyof T] {
-    const enumValues = (Object.values(anEnum) as unknown) as T[keyof T][];
-    const randomIndex = Math.floor(Math.random() * enumValues.length);
-    return enumValues[randomIndex];
-  }
+function random_interest(): Interest{
+    return floor(random(0, Object.keys(Interest).length/2));
+}
+
+interface ConversationEntry {
+    conversation: Conversation;
+    timestamp: number;
+}
 
 class Relation {
     a: Person;
     b: Person;
     quality: number = 1;
+    conversation_stack: ConversationEntry[] = [];
 
     constructor(a: Person, b: Person){
         this.a = a;
         this.b = b;
     }
 };
+
+function easeInOutCubic(x: number): number {
+    return x < 0.5 ? 4 * x * x * x : 1 - pow(-2 * x + 2, 3) / 2;
+}
+
+function easeInOutQuad(x: number): number {
+    return x < 0.5 ? 2 * x * x : 1 - pow(-2 * x + 2, 2) / 2;
+    }
 
 let screen_size: number;
 
@@ -64,6 +76,12 @@ class Person {
     // emotion: Emotion = Emotion.HAPPY;
     x: number;
     y: number;
+    origin_x: number;
+    origin_y: number;
+
+    offset_x = 0;
+    offset_y = 0;
+    offset_time = 0;
 
     eye_x: number = 0;
     eye_y: number = 0;
@@ -71,6 +89,8 @@ class Person {
     constructor(x: number, y: number){
         this.x = x;
         this.y = y;
+        this.origin_x = x;
+        this.origin_y = y;
     }
 
     get_absolute_position() : p5.Vector {
@@ -95,8 +115,7 @@ class Person {
             }else{
                 if(this.interests.length<3){
                     while(true){
-                        let interest = floor(random(0, Object.keys(Interest).length/2));
-                        console.log(0, Object.keys(Interest).length,interest, this.has_interest(interest))
+                        let interest = random_interest();
                         
                         if(!this.has_interest(interest)){
                             this.interests.push(interest);
@@ -160,6 +179,15 @@ class Person {
     }
 
     draw() {
+        this.offset_time += deltaTime;
+        if(this.offset_time>random(200, 500)){
+            this.offset_time = 0;
+            this.offset_x = (random()-.5)*.1;
+            this.offset_y = (random()-.5)*.1;
+        }
+        this.x = lerp(this.x, this.origin_x + this.offset_x, .005);
+        this.y = lerp(this.y, this.origin_y + this.offset_y, .005);
+
         let position = this.get_absolute_position();
         this.happiness = towards(this.happiness, this.target_happiness, .05);
 
@@ -245,34 +273,61 @@ class Conversation {
     relation: Relation;
     a_topic: Interest;
     b_topic: Interest;
+    a_liked: boolean;
+    b_liked: boolean;
+    flushed: boolean = false;
+    timestamp = Date.now();
     
     constructor(relation: Relation){
         this.relation = relation;
     }
+
+    render() {
+        let alpha = this.get_alpha();
+
+        let pointa = this.relation.a.get_absolute_position();
+        let pointb = this.relation.b.get_absolute_position();
+        // Lovely typescript, innit?
+        let ab = <p5.Vector><unknown>p5.Vector.lerp(pointa, pointb, easeInOutQuad(alpha));
+        let ba = <p5.Vector><unknown>p5.Vector.lerp(pointb, pointa, easeInOutQuad(alpha));
+
+        let scl = get_scale() * 1.2;
+        push();
+        translate(ab.x, ab.y);
+        scale(scl, scl);
+        draw_interest(this.a_topic);
+        pop();
+        
+        push();
+        translate(ba.x, ba.y);
+        scale(scl, scl);
+        draw_interest(this.b_topic);
+        pop();
+
+        return alpha<1;
+    }
+
+    get_alpha(): number {
+        return (Date.now()-this.timestamp)/2000;
+    }
 };
 
 function draw_interest(interest: Interest){
-    for(let i = 0; i < 2; i++){
-        push();
-        if(i==0){
-            translate(3, 3);
-            fill(0, 0, 0, 50);
-        }
-        switch(interest){
-            case Interest.CIRCLE:
-                if(i==1) fill(COLORS.PURPLE);
-                circle(0, 0, 20);
-                break;
-                case Interest.SQUARE:
-                if(i==1) fill(COLORS.GREEN);
-                rect(-10, -10, 20, 20);
-                break;
-                case Interest.TRIANGLE:
-                if(i==1) fill(COLORS.YELLOW);
-                triangle(0, -10, 10, 10, -10, 10);
-                break;
-        }
-        pop();
+    stroke(COLORS.BLACK);
+    strokeWeight(5 * get_scale());
+    switch(interest){
+        case Interest.CIRCLE:
+            fill(COLORS.PURPLE);
+            circle(0, 0, 20);
+            break;
+            case Interest.SQUARE:
+            fill(COLORS.GREEN);
+            rect(-10, -10, 20, 20);
+            break;
+            case Interest.TRIANGLE:
+            fill(COLORS.YELLOW);
+            triangle(0, -10, 10, 10, -10, 10);
+            break;
     }
 }
 
@@ -286,10 +341,20 @@ function create_relation(a: Person, b: Person){
 let selected_person: Person;
 let persons: Person[] = [];
 let relations: Relation[] = [];
+let conversations: Conversation[] = [];
+
+let like_image;
+function preload(){
+    like_image = loadImage("assets/like.png");
+}
 
 let au: p5.SoundFile;
+let g;
 function setup(){
     createCanvas(windowWidth, windowHeight);
+    // createCanvas(windowWidth, windowHeight, WEBGL);
+    // smooth()
+    // g = createGraphics(windowWidth, windowHeight, p5.Renderer);
     {
         let person = new Person(0, 0);
         person.interests.push(Interest.CIRCLE);
@@ -336,44 +401,158 @@ function draw_relations(){
         let bpos = relation.b.get_absolute_position();
         stroke(lerpColor(lerpColor(color(COLORS.RED), color(COLORS.YELLOW), relation.quality), color(COLORS.GREEN), relation.quality));
         line(apos.x, apos.y, bpos.x, bpos.y);
+
+        let delta = apos.add(bpos.sub(apos).div(2));
+
+        push();
+        // translate(delta.x, delta.y);
+        // scale(get_scale(), get_scale());
+        // translate(-20, -15);
+        relation.conversation_stack = relation.conversation_stack.filter((conversation) => {
+            // Hacky code warning
+            let apos = conversation.conversation.relation.a.get_absolute_position();
+            let bpos = conversation.conversation.relation.b.get_absolute_position();
+
+            let scl = get_scale();
+
+            push();
+            delta = p5.Vector.sub(bpos, apos);
+            let pos = p5.Vector.add(apos, delta.div(delta.mag()).mult(75 * scl));
+            translate(pos.x, pos.y);
+            if(conversation.conversation.a_liked){
+                tint(COLORS.GREEN);
+            }else{
+                tint(COLORS.RED);
+                scale(1, -1);
+            }
+            scale(scl*1.3, scl*1.3);
+            translate(-15, -15);
+            image(like_image, 0, 0, 30, 30);
+            pop();
+
+            push();
+            delta = p5.Vector.sub(apos, bpos);
+            // delta = apos.sub(bpos);
+            pos = p5.Vector.add(bpos, delta.div(delta.mag()).mult(75 * scl));
+            translate(pos.x, pos.y);
+            if(conversation.conversation.b_liked){
+                tint(COLORS.GREEN);
+            }else{
+                tint(COLORS.RED);
+                scale(1, -1);
+            }
+            scale(scl*1.3, scl*1.3);
+            translate(-15, -15);
+            image(like_image, 0, 0, 30, 30);
+            pop();
+
+            // push();
+            // delta = bpos.sub(bpos);
+            // pos = apos.add(delta.div(delta.mag()).mult(50));
+            // translate(pos.x, pos.y);
+            // if(conversation.conversation.a_liked){
+            //     tint(COLORS.GREEN);
+            // }else{
+            //     tint(COLORS.RED);
+            //     scale(1, -1);
+            //     translate(0, -30);
+            // }
+            // scale(4, 4)
+            // image(like_image, -20, 0, 30, 30);
+            // pop();
+            
+            // push();
+            // if(conversation.conversation.b_liked){
+            //     tint(COLORS.GREEN);
+            // }else{
+            //     tint(COLORS.RED);
+            //     scale(1, -1);
+            //     translate(0, -30);
+            // }
+            // image(like_image, 20, 0, 30, 30);
+            // pop();
+            return Date.now()-conversation.timestamp<500;
+        });
+        pop();
     }
 }
+
+let relation_index = 0;
 
 function cycle(){
     persons.forEach((person)=>person.cycle());
 
+    console.log(relation_index)
+    if(relation_index>relations.length-1){
+        relation_index = 0;
+    }
+
+    if(relations.length>0){
+        let relation = relations[relation_index];
+
+        let conversation = new Conversation(relation);
+
+        let a_topic = relation.a.interests[floor(random(0, relation.a.interests.length))];
+        let b_topic = relation.b.interests[floor(random(0, relation.b.interests.length))];
+
+        conversation.a_liked = relation.a.has_interest(b_topic);
+        conversation.b_liked = relation.b.has_interest(a_topic);
+        // relation.b.hear_topic(relation.a, relation, a_topic);
+        // relation.a.hear_topic(relation.b, relation, b_topic);
+
+        conversation.a_topic = a_topic;
+        conversation.b_topic = b_topic;
+        conversations.push(conversation);
+        relation_index++;
+    }
     relations = relations.filter((relation)=>{
         let conversation = new Conversation(relation);
-        let matches = 0;
-        let total_count = max(relation.a.interests.length, relation.b.interests.length);
-        for(let interests_a of relation.a.interests){
-            relation.b.hear_topic(relation.a, relation, interests_a);
-            if(relation.b.has_interest(interests_a)){
-                matches++;
-            }
-        }
 
-        for(let interests_b of relation.b.interests){
-            relation.a.hear_topic(relation.b, relation, interests_b);
-        }
+        let a_topic = relation.a.interests[floor(random(0, relation.a.interests.length))];
+        let b_topic = relation.b.interests[floor(random(0, relation.b.interests.length))];
 
-        if((matches/total_count)<.5){
-            relation.quality -= .1;
-        }
+        conversation.a_liked = relation.a.has_interest(b_topic);
+        conversation.b_liked = relation.b.has_interest(a_topic);
+        // relation.b.hear_topic(relation.a, relation, a_topic);
+        // relation.a.hear_topic(relation.b, relation, b_topic);
 
-        if(relation.quality<=0){
-            return false;
-        }
+        conversation.a_topic = a_topic;
+        conversation.b_topic = b_topic;
+        conversations.push(conversation);
+        // console.log(a_topic, b_topic)
+
+        // let matches = 0;
+        // let total_count = max(relation.a.interests.length, relation.b.interests.length);
+        // for(let interests_a of relation.a.interests){
+        //     relation.b.hear_topic(relation.a, relation, interests_a);
+        //     if(relation.b.has_interest(interests_a)){
+        //         matches++;
+        //     }
+        // }
+
+        // for(let interests_b of relation.b.interests){
+        //     relation.a.hear_topic(relation.b, relation, interests_b);
+        // }
+
+        // if((matches/total_count)<.5){
+        //     relation.quality -= .1;
+        // }
+
+        // if(relation.quality<=0){
+        //     return false;
+        // }
 
         return true;
     });
 
-    persons.forEach((person)=>person.evaluate_happiness());
+    // persons.forEach((person)=>person.evaluate_happiness());
 }
 
 let cycle_time = 0;
 function update(){
-    cycle_time += deltaTime/1000;
+    // console.log(frameRate())
+
+    cycle_time += deltaTime/1500;
     if(cycle_time>1){
         cycle_time = 0;
         cycle();
@@ -396,7 +575,44 @@ function draw(){
     rect(0, 0, screen_size, screen_size)
     pop();
 
+    // noFill();
+    // strokeWeight(1);
+    // stroke(COLORS.BLACK);
+    noStroke();
+    fill(COLORS.BLACK);
+    textSize(20);
+    text("FPS: "+floor(frameRate()), 20, 20, 100, 100);
+
     draw_relations();
+
+    conversations = conversations.filter((conversation)=>{
+        let keep = conversation.render();
+        if(!conversation.flushed && conversation.get_alpha()>.8){
+            conversation.flushed = true;
+
+            let delta = 0;
+            if(conversation.a_liked && conversation.b_liked){
+                delta++;
+            }
+
+            if(!conversation.a_liked && !conversation.b_liked){
+                delta-=2;
+            }else{
+                if(!conversation.a_liked || !conversation.b_liked){
+                    delta--;
+                }
+            }
+            conversation.relation.quality += delta * .1;
+            conversation.relation.quality = max(min(1, conversation.relation.quality), 0);
+
+            // conversation.relation.a.evaluate_happiness();
+            // conversation.relation.b.evaluate_happiness();
+            conversation.relation.conversation_stack.push({conversation: conversation, timestamp: Date.now()});
+        }
+        return keep;
+    });
+
+    // console.log(conversations.length);
 
     if(selected_person){
         stroke(COLORS.BLACK);
