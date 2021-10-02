@@ -1,0 +1,18 @@
+Delta
+- People appear
+- They have specific ideas (maybe shapes)
+- Join them or break their relation
+- Everything unbalance
+
+Engine:
+- Someone without relations may disappear (finishing the game)
+- Each person can have a "upgraded" relation
+- People may change their ideas:
+    - They get ideas from other relations
+    - They may lose ideas other relations don't have
+    - They may get ideas of near nodes (but not related) getting your relations angry
+- Persons may upgrade their relation with other people, losing completely the old one
+
+Iteration 1:
+- Each "turn" someone speaks
+- Everyone near or connected will hear their ideas
