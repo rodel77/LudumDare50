@@ -53,7 +53,6 @@ function random_interest(): Interest{
 
     
     let r = floor(random(0, Object.keys(Interest).length/2 - less));
-    console.log("Result", r);
     return r;
 }
 
@@ -140,11 +139,11 @@ class Person {
     }
 
     epiphany_chance(){
-        return this.happiness!=.5 ? map(clamp(cycle_count, 70, 200), 70, 200, .3, .5) : .7;
+        return this.happiness!=.5 ? map(clamp(cycle_count, 70, 200), 70, 200, .3, .4) : .7;
     }
 
     epiphany_frecuency(){
-        return this.happiness!=.5 ? map(clamp(cycle_count, 100, 200), 100, 200, 7, 4) : 1;
+        return this.happiness!=.5 ? map(clamp(cycle_count, 100, 200), 100, 200, 7, 5) : 1;
     }
 
     cycle(){
@@ -156,8 +155,8 @@ class Person {
         });
 
         this.last_epiphany++;
-        if((this.last_epiphany>this.epiphany_frecuency() && random()<this.epiphany_chance()) || (alone_interest)){
-            if(!alone_interest && random()>.2){
+        if((this.last_epiphany>this.epiphany_frecuency() && random()<this.epiphany_chance())){
+            if((!alone_interest || this.interests.length==2) && random()>.2){
                 if(this.interests.length>1){
                     this.interests.sort((a, b) => {
                         return (interests.has(a) ? interests.get(a) : 0) - (interests.has(b) ? interests.get(b) : 0);
@@ -165,11 +164,9 @@ class Person {
 
                     
                     let interest = this.interests.pop();
-                    console.log("Removing:", Interest[interest])
                     // let index = floor(random(0, this.interests.length))
                     // let interest = this.interests[index];
                     // this.interests.splice(index, 1);
-                    console.log("Adding interest #2", interest);
                     interests.set(interest, interests.get(interest)-1);
                 }
             }else{
@@ -466,6 +463,7 @@ let score = 0;
 let like_image;
 let font, font2;
 let plop, pling, nice, rip, dead, appear;
+let song: p5.SoundFile;
 function preload(){
     soundFormats("mp3");
     plop = loadSound("assets/plop");
@@ -474,6 +472,8 @@ function preload(){
     rip = loadSound("assets/rip");
     dead = loadSound("assets/dead");
     appear = loadSound("assets/appear");
+    song = loadSound("assets/music");
+    song.setLoop(true);
     like_image = loadImage("assets/like.png");
     font = loadFont("assets/Ubuntu-Medium.ttf")
     font2 = loadFont("assets/Merriweather-Light.ttf")
@@ -490,15 +490,21 @@ function setup(){
     // g = createGraphics(windowWidth, windowHeight, p5.Renderer);
 
     positions = [
-        createVector(-1, 1),
-        createVector(1, -1),
-        createVector(1, 1),
-        createVector(-1, -1),
-        createVector(0, .6),
-        createVector(0, -.6),
-        createVector(.6, 0),
-        createVector(-.6, 0),
+        // createVector(0, -1),
+        // createVector(0, 1),
+        // createVector(1, -1),
+        // createVector(1, 1),
+        // createVector(-1, -1),
+        // createVector(0, .6),
+        // createVector(0, -.6),
+        // createVector(.6, 0),
+        // createVector(-.6, 0),
     ]
+
+    for(let alpha = 0; alpha < PI * 2; alpha += radians(45)){
+        positions.push(createVector(cos(alpha), sin(alpha)));
+        // create_person();
+    }
 
     // for(let i = 0; i < 10; i++){
     //     while(true){
@@ -528,7 +534,6 @@ function create_person(){
         let interest = random_interest();
         if(!person.has_interest(interest)){
             person.interests.push(interest);
-            console.log("Adding interest #1", interest);
             interests.set(interest, interests.has(interest) ? interests.get(interest)+1 : 1);
         }
     }
@@ -695,16 +700,26 @@ function cycle(){
     }
 }
 
-let cycle_time = 0;
+let cycle_time;
 function update(){
-    // console.log(frameRate())
+    // cycle_time = song.currentTime() 
 
-    cycle_time += deltaTime/map(clamp(cycle_count, 50, 150), 50, 150, 1500, 500);
-    if(cycle_time>1 && relations.length>0){
-        console.log(map(clamp(cycle_count, 50, 150), 50, 150, 1500, 500))
-        cycle_time = 0;
+    let threshold = map(clamp(cycle_count, 30, 150), 30, 150, 1500, 500);
+
+    let count = 0;
+    persons.forEach((person)=>{
+        if(!person.dead) count++;
+    });
+
+    song.rate(map(count/persons.length, 0, 1, .8, 1));
+
+    if((!cycle_time || cycle_time>threshold) && relations.length>0){
+        // console.log(map(clamp(cycle_count, 50, 150), 50, 150, 1500, 500))
+        if(!cycle_time) cycle_time = threshold;
+        cycle_time -= threshold;
         cycle();
     }
+    cycle_time += deltaTime;
 }
 
 function draw(){
@@ -752,16 +767,6 @@ function draw(){
     textSize(scl*100);
     text(score, width/2, 100*scl);
 
-    push();
-    textAlign(CENTER, BOTTOM);
-    translate(-screen_size/2, -screen_size/2)
-    translate(windowWidth/2, windowHeight/2)
-    textFont(font2)
-    strokeWeight(scl*10);
-    if(cycle_count==0){
-        text("Not lonely, not to popular", 0, 0, screen_size, screen_size * .9);
-    }
-    pop();
     // text("Connect the lonely people", width/2, 100*scl);
     noStroke();
     fill(COLORS.BLACK);
@@ -789,7 +794,7 @@ function draw(){
                     delta--;
                 }
             }
-            conversation.relation.quality += delta * (map(clamp(cycle_count, 100, 200), 100, 200, .2, .5));
+            conversation.relation.quality += delta * (map(clamp(cycle_count, 100, 200), 100, 200, .2, .7));
             conversation.relation.quality = max(min(1, conversation.relation.quality), 0);
 
             conversation.relation.conversation_stack.push({conversation: conversation, timestamp: Date.now()});
@@ -813,6 +818,29 @@ function draw(){
     pop();
 
     draw_converations_feedback();
+
+    stroke(COLORS.BLACK);
+    fill(COLORS.WHITE);
+    push();
+    textAlign(CENTER, BOTTOM);
+    translate(-screen_size/2, -screen_size/2)
+    translate(windowWidth/2, windowHeight/2)
+    textFont(font2)
+    strokeWeight(scl*10);
+
+    let alive = false;
+    for(let person of persons){
+        if(!person.dead) alive = true;
+    }
+
+    if(!alive){
+        text("Solitude took all the souls", 0, 0, screen_size, screen_size * .9);
+    }
+
+    if(cycle_count==0){
+        text("Join the lonely souls", 0, 0, screen_size, screen_size * .9);
+    }
+    pop();
 }
 
 window.mousePressed = function(){
@@ -851,6 +879,9 @@ window.mouseReleased = function() {
         for(const person of persons) {
             if(person.collides(mouseX, mouseY) && person!=selected_person && !person.has_relation(selected_person)){
                 create_relation(person, selected_person);
+                if(!song.isPlaying()){
+                    song.play();
+                }
                 pling.play();
                 break;
             }
