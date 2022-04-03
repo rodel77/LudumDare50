@@ -730,7 +730,7 @@ function draw(){
         pop()
 
         push();
-        translate((4.5) * 10, (5) * 10);
+        translate((4) * 10, (5) * 10);
         scale(1/10, 1/10)
         stroke(COLORS.WHITE);
         strokeWeight(get_scale() * 13)
