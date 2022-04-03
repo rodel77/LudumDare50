@@ -39,7 +39,6 @@ function preload() {
     song = loadSound("assets/theme");
     song.setLoop(true);
     intro.onended(() => {
-        console.log(gameState);
         if (gameState != 2 && !song.isPlaying()) {
             song.play();
         }
@@ -166,15 +165,15 @@ class Piece {
         strokeWeight(get_scale() * 5);
         push();
         if (this.type == Pieces.KING) {
-            stroke(COLORS.WHITE);
-            scribble.scribbleRect(0, 30, 67, 27);
-            strokeWeight(get_scale() * 14);
-            scribble.scribbleCurve(0, 20, 0, -30, 30, 0, 50, -40);
-            scribble.scribbleCurve(0, 20, 0, -30, -30, 0, -50, -40);
-            scribble.scribbleLine(0, 20, 0, -30);
-            strokeWeight(get_scale() * 10);
-            scribble.scribbleLine(0, -30, 0, -45);
-            scribble.scribbleLine(-5, -40, 5, -40);
+            // stroke(COLORS.WHITE);
+            // scribble.scribbleRect(0, 30, 67, 27);
+            // strokeWeight(get_scale() * 14)
+            // scribble.scribbleCurve(0, 20, 0, -30, 30, 0, 50, -40);
+            // scribble.scribbleCurve(0, 20, 0, -30, -30, 0, -50, -40);
+            // scribble.scribbleLine(0, 20, 0, -30);
+            // strokeWeight(get_scale() * 10)
+            // scribble.scribbleLine(0, -30, 0, -45);
+            // scribble.scribbleLine(-5, -40, 5, -40);
             pop();
             stroke(COLORS.BLACK);
             push();
@@ -215,17 +214,12 @@ class Piece {
             }
         }
         if (this.type == Pieces.BISHOP) {
-            stroke(COLORS.BLACK);
-            scribble.scribbleRect(0, 30, 67, 27);
-            strokeWeight(get_scale() * 19);
-            scribble.scribbleEllipse(0, -35, 10, 10);
-            scribble.scribbleEllipse(0, 0, 35, 55);
-            // scribble.scribbleCurve(0, 20, 0, -30, 30, 0, 50, -40);
-            // scribble.scribbleCurve(0, 20, 0, -30, -30, 0, -50, -40);
-            // scribble.scribbleLine(0, 20, 0, -30);
-            strokeWeight(get_scale() * 10);
-            // scribble.scribbleLine(0, -30, 0, -45);
-            // scribble.scribbleLine(-5, -40, 5, -40);
+            // stroke(COLORS.BLACK);
+            // scribble.scribbleRect(0, 30, 67, 27);
+            // strokeWeight(get_scale() * 19)
+            // scribble.scribbleEllipse(0, -35, 10, 10);
+            // scribble.scribbleEllipse(0, 0, 35, 55);
+            // strokeWeight(get_scale() * 10)
             pop();
             stroke(COLORS.WHITE);
             push();
@@ -250,17 +244,17 @@ class Piece {
             // scale(1/10, 1/10)
             textSize(4);
             fill(COLORS.PURPLE);
-            for (let a = -8; a < 8; a++) {
-                let y = this.y + a;
-                let x1 = this.x + a;
-                let x2 = this.x - a;
-                let coords = toBoard(mouseX, mouseY);
-                if (y >= 0 && y <= 7 && (x1 >= 0 && x1 <= 7 || x2 >= 0 && x2 <= 7) && this.x == floor(coords[0]) && this.y == floor(coords[1])) {
-                    // text(valuePlaceDiagonal(x1, y, this), x1 * 10, y * 10);
-                    // text(valuePlaceDiagonal(x2, y, this), x2 * 10, y * 10);
-                    // text(valuePlaceCross(x1, this.y), x1 * 10, this.y * 10);
-                }
-            }
+            // for(let a = -8; a < 8; a++){
+            //     let y = this.y + a;
+            //     let x1 = this.x + a;
+            //     let x2 = this.x - a;
+            //     let coords = toBoard(mouseX, mouseY);
+            //     if(y>=0 && y<=7 && (x1>=0 && x1<=7 || x2>=0 && x2<=7) && this.x==floor(coords[0]) && this.y==floor(coords[1])){
+            //         // text(valuePlaceDiagonal(x1, y, this), x1 * 10, y * 10);
+            //         // text(valuePlaceDiagonal(x2, y, this), x2 * 10, y * 10);
+            //         // text(valuePlaceCross(x1, this.y), x1 * 10, this.y * 10);
+            //     }
+            // }
             pop();
         }
     }
@@ -480,6 +474,8 @@ function message(text) {
     messageTime = Date.now();
 }
 function draw() {
+    let t = 0;
+    t = Date.now();
     update();
     textAlign(CENTER, CENTER);
     randomSeed(Date.now() / 100);
@@ -536,6 +532,8 @@ function draw() {
     }
     // console.log(mouseX)
     pop();
+    // t = Date.now();
+    // console.log(Date.now()-t);
     piece.draw();
     pieces.forEach((e) => e.draw());
     push();
