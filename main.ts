@@ -2,24 +2,28 @@ declare function loadSound(path: string): p5.SoundFile;
 
 declare var drawingContext: CanvasRenderingContext2D;
 
-function sign(x: number) : number{
-    if(x==0) return 0;
-    return x>0 ? 1 : -1;
-}
+declare class Scribble {
+    scribbleLine(x1: number, y1: number, x2: number, y2: number): void;
+    scribbleRect(x: number, y: number, w: number, h: number);
+    scribbleRoundedRect(x: number, y: number, w: number, h: number, radius: number);
+    scribbleEllipse(x: number, y: number, w: number, h: number);
+    scribbleCurve(x1: number, y1: number, x2: number, y2: number, x3: number, y3: number, x4: number, y4: number);
+    getOffset(minVal: number, maxVal: number): number;
+    scribbleFilling(xCoords: number[], yCoords: number[], gap: number, angle: number);
+    bowing: number;          // changes the bowing of lines
+    roughness: number;       // changes the roughness of lines
+    maxOffset: number;       // coordinates will get an offset, here you define the max offset
+    numEllipseSteps: number; // defines how much curves will be used to draw an ellipse
+};
 
-function towards(current: number, target: number, max_delta: number) : number {
-    if(abs(target-current)<=max_delta) return target;
-
-    return current + sign(target - current) * max_delta;
-}
-
-function clamp(x: number, a: number, b: number){
-    return max(min(b, x), a);
-}
+const IS_DRAWING = false;
+let draw_stack = [];
+let last_x = 0;
+let last_y = 0;
 
 const COLORS = {
-    YELLOW: [241, 196, 15],
-    BLACK:  [44, 62, 80],
+    YELLOW: [241, 200, 15],
+    BLACK:  [0, 0, 0],
     BLUE:   [52, 152, 219],
     CYAN:   [26, 188, 156],
     WHITE:  [255, 255, 255],
@@ -30,711 +34,560 @@ const COLORS = {
     PINK:   [243, 104, 224],
 };
 
-enum Emotion {
-    HAPPY,
-    SAD,
-    MEH,
-};
+const HEART = [[1171,865],[745,869],[876,375],[831,203],[950,205],[951,169],[913,167],[912,125],[948,127],[948,80],[989,81],[987,119],[1021,121],[1019,163],[987,164],[985,198],[1144,204],[1061,373],[1170,864]];
 
-enum Interest {
-    SQUARE,
-    CIRCLE,
-    TRIANGLE,
-    DIAMOND,
-    HEX,
-};
+var scribble = new Scribble();
 
-function random_interest(): Interest{
-    let less = 3;
-
-    if(cycle_count>10) less = 2;
-    if(cycle_count>75) less = 1;
-    if(cycle_count>100) less = 0;
-
-    
-    let r = floor(random(0, Object.keys(Interest).length/2 - less));
-    return r;
-}
-
-interface ConversationEntry {
-    conversation: Conversation;
-    timestamp: number;
-}
-
-class Relation {
-    a: Person;
-    b: Person;
-    quality: number = 1;
-    conversation_stack: ConversationEntry[] = [];
-    harmed: boolean = false;
-    harm_timestamp: number;
-    
-    constructor(a: Person, b: Person){
-        this.a = a;
-        this.b = b;
-    }
-
-    destroy() {
-        conversations = conversations.filter((conv)=>{
-            return conv.relation!=this;
-        });
-        this.conversation_stack.filter(()=>{return false});
-    }
-};
-
-function easeInOutCubic(x: number): number {
-    return x < 0.5 ? 4 * x * x * x : 1 - pow(-2 * x + 2, 3) / 2;
-}
-
-function easeInOutQuad(x: number): number {
-    return x < 0.5 ? 2 * x * x : 1 - pow(-2 * x + 2, 2) / 2;
-    }
-
-let screen_size: number;
-let deleting_relations = false;
-
-function get_scale(): number{
-    return screen_size / 1000;
-}
-
-let interests: Map<Interest, number> = new Map();
-
-class Person {
-    happiness: number = 0;
-    target_happiness: number = 0;
-    interests: Interest[] = [];
-    last_epiphany: number = 0;
-    depression: number = 0;
-    // emotion: Emotion = Emotion.HAPPY;
-    x: number;
-    y: number;
-    origin_x: number;
-    origin_y: number;
-    dead: boolean;
-
-    offset_x = 0;
-    offset_y = 0;
-    offset_time = 0;
-
-    eye_x: number = 0;
-    eye_y: number = 0;
-
-    constructor(x: number, y: number){
-        this.x = x;
-        this.y = y;
-        this.origin_x = x;
-        this.origin_y = y;
-    }
-
-    get_absolute_position() : p5.Vector {
-        // console.log(this.x * screen_size, mouseX)
-        return createVector(this.x * screen_size * .4 + width/2, this.y * screen_size * .4 + height/2);
-    }
-
-    collides(x: number, y: number) {
-        if(this.dead) return false;
-        let position = this.get_absolute_position();
-        let delta = createVector(x, y).sub(position);
-        return delta.mag() < 50 * get_scale();
-    }
-
-    epiphany_chance(){
-        return this.happiness!=.5 ? map(clamp(cycle_count, 70, 200), 70, 200, .3, .4) : .7;
-    }
-
-    epiphany_frecuency(){
-        return this.happiness!=.5 ? map(clamp(cycle_count, 100, 200), 100, 200, 7, 5) : 1;
-    }
-
-    cycle(){
-        let alone_interest: Interest;
-        interests.forEach((amount, key)=>{
-            if(amount==1){
-                alone_interest = key;
-            }
-        });
-
-        this.last_epiphany++;
-        if((this.last_epiphany>this.epiphany_frecuency() && random()<this.epiphany_chance())){
-            if((!alone_interest || this.interests.length==2) && random()>.2){
-                if(this.interests.length>1){
-                    this.interests.sort((a, b) => {
-                        return (interests.has(a) ? interests.get(a) : 0) - (interests.has(b) ? interests.get(b) : 0);
-                    });
-
-                    
-                    let interest = this.interests.pop();
-                    // let index = floor(random(0, this.interests.length))
-                    // let interest = this.interests[index];
-                    // this.interests.splice(index, 1);
-                    interests.set(interest, interests.get(interest)-1);
-                }
-            }else{
-                if(this.interests.length<2 && cycle_count>10){
-                    let possible: Interest[] = [];
-
-                    // if(cycle_count>100){
-                        possible[0] = random_interest();
-                        possible[1] = random_interest();
-                        possible[2] = random_interest();
-                        possible[3] = random_interest();
-                        possible[4] = random_interest();
-                        possible[5] = random_interest();
-                    // }else{
-                    //     if(cycle_count>75 && !interests.has(Interest.DIAMOND)){
-                    //         possible.push(Interest.DIAMOND);
-                    //     }
-                    //     if(cycle_count>100 && !interests.has(Interest.HEX)){
-                    //         possible.push(Interest.HEX);
-                    //     }
-    
-                    //     interests.forEach((_, key)=>{
-                    //         possible.push(key);
-                    //     });
-                    //     possible.sort((a, b) => {
-                    //         return (interests.has(a) ? interests.get(a) : 0)-(interests.has(b) ? interests.get(b) : 0);
-                    //     });
-                    // }
-
-                    for(let interest of possible){
-                        if(!this.has_interest(interest)){
-                            this.interests.push(interest);
-                            interests.set(interest, interests.has(interest) ? interests.get(interest)+1 : 1);
-                            break;
-                        }
-                    }
-                }
-            }
-            this.last_epiphany = 0;
-        }
-    }
-
-    evaluate_happiness() {
-        let count = 0;
-        relations.forEach((relation) => {
-            if(!relation.harmed && (relation.a==this || relation.b==this)){
-                count++;
-            }
-        });
-
-        if(count==0){
-            this.target_happiness = 0;
-        }else if(count>2){
-            this.target_happiness = .5;
-        }else{
-            this.target_happiness = 1;
-        }
-    }
-
-    has_relation(other: Person){
-        for(let relation of relations){
-            if((relation.a==this || relation.b==this) && (relation.a==other || relation.b==other)){
-                return true;
-            }
-        };
-        return false
-    }
-
-    has_interest(interest: Interest){
-        return this.interests.indexOf(interest)!=-1;
-    }
-
-    hear_topic(other: Person, relation: Relation, topic: Interest){
-        // if(!this.has_interest(topic)){
-        //     // Check if more than 2 relations have the same interest
-        //     let count = 0;
-        //     relations.filter((relation)=>{
-        //         return relation.a==this || relation.b==this;
-        //     }).map((relation)=>{
-        //         return relation.a==this ? relation.b : relation.a;
-        //     }).forEach((person) => {
-        //         if(person.has_interest(topic)) count++;
-        //     });
-
-        //     if(count>=2){
-        //         this.interests.push(topic);
-        //     }else{
-        //         // relation.quality -= .1;
-        //     }
-        // }
-    }
-
-    draw() {
-        if(this.happiness!=1 && cycle_count>0){
-            this.depression += 0.2 * deltaTime/1000;
-        }
-        if(this.happiness!=0 && this.depression>0){
-            this.depression -= 0.1 * deltaTime/1000;
-        }
-        this.depression = clamp(this.depression, 0, 1);
-        if(this.depression==1){
-            if(!this.dead){
-                for(let interest of this.interests){
-                    interests.set(interest, interests.get(interest)-1);
-                }
-                relations = relations.filter((relation)=>relation.a!=this && relation.b!=this);
-                if(selected_person==this) selected_person = undefined;
-                this.dead = true;
-                dead.play();
-            }
-        }
-        
-        this.offset_time += deltaTime;
-        if(this.offset_time>500){
-            this.offset_time = 0;
-            this.offset_x = (random()-.5)*.6;
-            this.offset_y = (random()-.5)*.6;
-        }
-        this.x = lerp(this.x, this.origin_x + this.offset_x, .002);
-        this.y = lerp(this.y, this.origin_y + this.offset_y, .002);
-
-        let position = this.get_absolute_position();
-        this.happiness = towards(this.happiness, this.target_happiness, .05);
-
-        push();
-        
-        noStroke();
-        translate(position.x, position.y);
-        scale(get_scale()*.9, get_scale()*.9);
-        if(this.collides(mouseX, mouseY) || selected_person==this) scale(1.1, 1.1)
-    
-        // Shadow
-        push();
-        translate(10, 10)
-        fill(0, 0, 0, 50);
-        circle(0, 0, 100);
-        pop();
-    
-        fill(lerpColor(color(COLORS.BLUE),color(COLORS.YELLOW), this.happiness));
-        if(this.dead) fill(COLORS.RED);
-        circle(0, 0, 100);
-        fill(COLORS.BLACK);
-        push();
-        let delta_x = mouseX-position.x;
-        let delta_y = mouseY-position.y;
-
-        let mag = sqrt(pow(delta_x, 2) + pow(delta_y, 2));
-
-        if(this.dead){
-            translate(this.eye_x, this.eye_y);
-            strokeWeight(get_scale()*3);
-            stroke(COLORS.BLACK)
-            line(-15, -15, -10, -10);
-            line(-10, -15, -15, -10);
-    
-            line(15, -15, 10, -10);
-            line(10, -15, 15, -10);
-        }else{
-            this.eye_x = lerp(this.eye_x, delta_x/mag, .25);
-            this.eye_y = lerp(this.eye_y, delta_y/mag, .25);
-            translate(this.eye_x, this.eye_y);
-            ellipse(-15, -10, 10, 15);
-            ellipse(15, -10, 10, 15);
-        }
-        pop();
-    
-        stroke(COLORS.BLACK);
-        strokeWeight(5);
-        strokeCap(PROJECT);
-        noFill();
-        if(selected_person==this || this.dead){
-            circle(0, 20, 20);
-        }else{
-            let point_y = map(this.happiness, 0, 1, 5, 35);
-            bezier(-20, 20, -10, point_y, 10, point_y, 20, 20);
-        }
-
-        if(this.depression>0 && !this.dead){
-            noStroke()
-            fill(COLORS.BLACK);
-            ellipse(40, -40, 35, 35);
-            fill(COLORS.RED);
-            arc(40, -40, 30, 30, -.01, PI*2*this.depression);
-        }
-
-        // Interests
-        if(!this.dead){
-            noStroke();
-            fill(COLORS.WHITE);
-            translate(-(this.interests.length-1)*25/2, -75);
-            this.interests.forEach((interest) => {
-                draw_interest(interest);
-                translate(25, 0);
-            });
-        }
-        pop();
-    }
-};
-
-class Conversation {
-    relation: Relation;
-    a_topic: Interest;
-    b_topic: Interest;
-    a_liked: boolean;
-    b_liked: boolean;
-    flushed: boolean = false;
-    timestamp = Date.now();
-    
-    constructor(relation: Relation){
-        this.relation = relation;
-    }
-
-    render() {
-        let alpha = this.get_alpha();
-
-        let pointa = this.relation.a.get_absolute_position();
-        let pointb = this.relation.b.get_absolute_position();
-        // Lovely typescript, innit?
-        let ab = <p5.Vector><unknown>p5.Vector.lerp(pointa, pointb, easeInOutQuad(alpha));
-        let ba = <p5.Vector><unknown>p5.Vector.lerp(pointb, pointa, easeInOutQuad(alpha));
-
-        let scl = get_scale() * 1.2;
-        push();
-        translate(ab.x, ab.y);
-        scale(scl, scl);
-        draw_interest(this.a_topic);
-        pop();
-        
-        push();
-        translate(ba.x, ba.y);
-        scale(scl, scl);
-        draw_interest(this.b_topic);
-        pop();
-
-        return alpha<1;
-    }
-
-    get_alpha(): number {
-        return (Date.now()-this.timestamp)/2000;
-    }
-};
-
-function draw_interest(interest: Interest){
-    stroke(COLORS.BLACK);
-    strokeWeight(5 * get_scale());
-    switch(interest){
-            case Interest.HEX:
-            fill(COLORS.PINK);
-            beginShape()
-            vertex(10, 0);
-            vertex(6, -10);
-            vertex(-6, -10);
-            vertex(-10, 0);
-            vertex(-6, 10);
-            vertex(6, 10);
-            vertex(10, 0);
-            endShape()
-            break;
-            case Interest.CIRCLE:
-            fill(COLORS.PURPLE);
-            circle(0, 0, 20);
-            break;
-            case Interest.SQUARE:
-            fill(COLORS.GREEN);
-            rect(-10, -10, 20, 20);
-            break;
-            case Interest.TRIANGLE:
-            fill(COLORS.YELLOW);
-            triangle(0, -10, 10, 10, -10, 10);
-            break;
-            case Interest.DIAMOND:
-            fill(COLORS.ORANGE);
-            push();
-            rotate(PI/4);
-            rect(-15/2, -15/2, 15, 15);
-            pop();
-            break;
-    }
-}
-
-function create_relation(a: Person, b: Person){
-    let ab = new Relation(a, b);
-    relations.push(ab);
-
-    persons.forEach((person)=>person.evaluate_happiness());
-}
-
-let selected_person: Person;
-let persons: Person[] = [];
-let relations: Relation[] = [];
-let conversations: Conversation[] = [];
-let score = 0;
-
+var screen_size
+var scl;
 let like_image;
 let font, font2;
-let plop, pling, nice, rip, dead, appear;
+let move, place, check, checkmate;
 let song: p5.SoundFile;
+let intro: p5.SoundFile;
 function preload(){
     soundFormats("mp3");
-    plop = loadSound("assets/plop");
-    pling = loadSound("assets/pling");
-    nice = loadSound("assets/nice");
-    rip = loadSound("assets/rip");
-    dead = loadSound("assets/dead");
-    appear = loadSound("assets/appear");
-    song = loadSound("assets/music");
+    // plop = loadSound("assets/plop");
+    // pling = loadSound("assets/pling");
+    // nice = loadSound("assets/nice");
+    // rip = loadSound("assets/rip");
+    // dead = loadSound("assets/dead");
+    move = loadSound("assets/move");
+    place = loadSound("assets/place");
+    intro = loadSound("assets/intro");
+    check = loadSound("assets/check");
+    checkmate = loadSound("assets/checkmate");
+    song = loadSound("assets/theme");
     song.setLoop(true);
-    like_image = loadImage("assets/like.png");
-    font = loadFont("assets/Ubuntu-Medium.ttf")
-    font2 = loadFont("assets/Merriweather-Light.ttf")
+    intro.onended(()=>{
+        console.log(gameState);
+        if(gameState!=2 && !song.isPlaying()){
+            song.play()
+        }
+    })
+    // like_image = loadImage("assets/like.png");
+    font = loadFont("assets/Pangolin-Regular.ttf")
 }
 
 let positions: p5.Vector[] = [];
 let au: p5.SoundFile;
 let g;
+
+let fun = 100;
+
+let turn = 0;
+
+let botMoved = false;
+let updateTime = 0;
+
+enum Pieces {
+    KING,
+    BISHOP,
+}
+
+function toBoard(x, y){
+    return [(x - windowWidth/2 + screen_size/2)/10/10/get_scale()-1, (y - windowHeight/2 + screen_size/2)/10/10/get_scale()-1];
+    // let mouseLY = (mouseY - windowHeight/2 + screen_size/2)/10;
+}
+
+let gameState = 0;
+let lastPlayed;
+let cycles;
+let cyclesNeeded;
+let moves;
+
+function arrow(x1, y1, x2, y2){
+    stroke(COLORS.WHITE);
+    strokeWeight(get_scale() * 13)
+    scribble.scribbleLine(x1, y1, x2, y2);
+    scribble.scribbleLine(x2, y2, x2, y2);
+    // scribble.scribbleLine(-100, 100, -100, 80);
+    // scribble.scribbleLine(-100, 100, -80, 100);
+    stroke(COLORS.BLACK);
+    strokeWeight(get_scale() * 5)
+    scribble.scribbleLine(-50, 50, -100, 100);
+    scribble.scribbleLine(-100, 100, -100, 80);
+    scribble.scribbleLine(-100, 100, -80, 100);
+}
+
+class Piece {
+    x: number;
+    y: number;
+    fromX?: number;
+    fromY?: number;
+    gotoX?: number;
+    gotoY?: number;
+    type: Pieces;
+    moveTime: number;
+    moving = false;
+    consecutive = 0;
+
+    constructor(type: Pieces, x: number, y: number) {
+        this.x = x;
+        this.y = y;
+        this.type = type;
+    }
+
+    value(x: number = this.x, y: number = this.y){
+        return valuePlaceDiagonal(x, y, this);
+    }
+
+    bestCell(): number[] {
+        let bestScore, bestCell;
+        switch(this.type){
+            case Pieces.BISHOP:
+                for(let a = -8; a < 8; a++){
+                    let y = this.y + a;
+                    let x1 = this.x + a;
+                    let x2 = this.x - a;
+                    if(y>=0 && y<=7 && (x1>=0 && x1<=7 || x2>=0 && x2<=7)){
+                        const vala = this.value(x1, y);
+                        const valb = this.value(x2, y);
+
+                        if((bestScore==undefined || bestScore<vala) && (x1>=0 && x1<=7 && y>=0 && y<=7 && x1!=this.x && y!=this.y) && !isOcuppied(x1, y)){
+                            bestScore = vala;
+                            bestCell = [x1, y];
+                        }
+                        if((bestScore==undefined || bestScore<valb) && (x2>=0 && x2<=7 && y>=0 && y<=7 && x2!=this.x && y!=this.y) && !isOcuppied(x2, y)){
+                            bestScore = valb;
+                            bestCell = [x2, y];
+                        }
+                    }
+                }
+            case Pieces.KING:
+                break;
+        }
+
+        return bestCell;
+    }
+
+    draw(){
+        if(this.gotoX!=undefined || this.gotoY!=undefined){
+            let alpha = pow(min((Date.now()-this.moveTime)/500, 1), 3);
+            this.x = lerp(this.fromX, this.gotoX, alpha);
+            this.y = lerp(this.fromY, this.gotoY, alpha);
+            if(this.x==this.gotoX && this.y==this.gotoY){
+                this.gotoX = undefined;
+                this.gotoY = undefined;
+                this.moving = false;
+                place.play();
+            }
+        }
+
+        push();
+        translate((this.x) * 10, (this.y) * 10);
+        scale(1/10, 1/10)
+        // console.log(this.x, this.y)
+
+        if(turn==0 && gameState!=2 && this.type==Pieces.KING){
+            push()
+            stroke(COLORS.YELLOW)
+            strokeWeight(get_scale() * 2.5);
+            translate(-50, -50)
+            translate(-100, -100)
+            for(let y = -1; y <= 1; y++){
+                for(let x = -1; x <= 1; x++){
+                    if(!(x==0 && y==0) && this.x+x>=0 && this.y+y>=0 && this.x+x<=7 && this.y+y<=7){
+
+                        stroke(COLORS.YELLOW)
+                        if(moves==0){
+                            for(let i = 0; i < pieces.length; i++){
+                                if(isDiagonal(this.x+x, this.y+y, pieces[i].x, pieces[i].y)){
+                                    stroke(COLORS.RED)
+                                    break;
+                                }
+                            }
+                        }
+
+                        scribble.scribbleRect(50, 50, 90, 90);
+                        translate(5, 5)
+                        scribble.scribbleFilling([0, 90, 90, 0], [0, 0, 90, 90], 10, 215);
+                        translate(-5, -5)
+                    }
+                    translate(100, 0)
+                }
+                translate(-300, 100)
+            }
+            pop();
+        }
+
+        strokeWeight(get_scale() * 5)
+        push()
+        
+        if(this.type==Pieces.KING){
+            stroke(COLORS.WHITE);
+            scribble.scribbleRect(0, 30, 67, 27);
+            strokeWeight(get_scale() * 14)
+            scribble.scribbleCurve(0, 20, 0, -30, 30, 0, 50, -40);
+            scribble.scribbleCurve(0, 20, 0, -30, -30, 0, -50, -40);
+            scribble.scribbleLine(0, 20, 0, -30);
+            strokeWeight(get_scale() * 10)
+            scribble.scribbleLine(0, -30, 0, -45);
+            scribble.scribbleLine(-5, -40, 5, -40);
+            pop()
+            stroke(COLORS.BLACK);
+            push()
+            translate(-60/2, 23)
+            scribble.scribbleFilling([0, 60, 60, 0], [0, 0, 15, 15], 7, 215);
+            pop();
+            // translate(70/2, -10)
+            scribble.scribbleRect(0, 30, 60, 15);
+            strokeWeight(get_scale() * 7)
+            // // scribble.scribbleLine(0, 2, 0, -3);
+            scribble.scribbleLine(0, 20, 0, -30);
+            scribble.scribbleCurve(0, 20, 0, -30, 30, 0, 50, -40);
+            scribble.scribbleCurve(0, 20, 0, -30, -30, 0, -50, -40);
+            strokeWeight(get_scale() * 5)
+            scribble.scribbleLine(0, -30, 0, -45);
+            scribble.scribbleLine(-5, -40, 5, -40);
+
+            if(gameState==0){
+                stroke(COLORS.WHITE);
+                strokeWeight(get_scale() * 13)
+                scribble.scribbleLine(-50, 50, -100, 100);
+                scribble.scribbleLine(-100, 100, -100, 80);
+                scribble.scribbleLine(-100, 100, -80, 100);
+                stroke(COLORS.BLACK);
+                strokeWeight(get_scale() * 5)
+                scribble.scribbleLine(-50, 50, -100, 100);
+                scribble.scribbleLine(-100, 100, -100, 80);
+                scribble.scribbleLine(-100, 100, -80, 100);
+
+                stroke(COLORS.WHITE);
+                strokeWeight(get_scale() * 13)
+                scribble.scribbleLine(50, -50, 100, -100);
+                scribble.scribbleLine(100, -100, 100, -80);
+                scribble.scribbleLine(100, -100, 80, -100);
+                stroke(COLORS.BLACK);
+                strokeWeight(get_scale() * 5)
+                scribble.scribbleLine(50, -50, 100, -100);
+                scribble.scribbleLine(100, -100, 100, -80);
+                scribble.scribbleLine(100, -100, 80, -100);
+            }
+        }
+        if(this.type==Pieces.BISHOP){
+            stroke(COLORS.BLACK);
+            scribble.scribbleRect(0, 30, 67, 27);
+            strokeWeight(get_scale() * 19)
+            scribble.scribbleEllipse(0, -35, 10, 10);
+            scribble.scribbleEllipse(0, 0, 35, 55);
+            // scribble.scribbleCurve(0, 20, 0, -30, 30, 0, 50, -40);
+            // scribble.scribbleCurve(0, 20, 0, -30, -30, 0, -50, -40);
+            // scribble.scribbleLine(0, 20, 0, -30);
+            strokeWeight(get_scale() * 10)
+            // scribble.scribbleLine(0, -30, 0, -45);
+            // scribble.scribbleLine(-5, -40, 5, -40);
+            pop()
+            stroke(COLORS.WHITE);
+            push()
+            translate(-60/2, 23)
+            scribble.scribbleFilling([0, 60, 60, 0], [0, 0, 15, 15], 7, 215);
+            pop();
+            // translate(70/2, -10)
+            scribble.scribbleRect(0, 30, 60, 15);
+            strokeWeight(get_scale() * 7)
+            // // scribble.scribbleLine(0, 2, 0, -3);
+            // scribble.scribbleLine(0, 20, 0, -30);
+            fill(COLORS.WHITE);
+            scribble.scribbleEllipse(0, -35, 10, 10);
+            scribble.scribbleEllipse(0, 0, 35, 55);
+            // scribble.scribbleCurve(15, 20, 0, -30, 35, 5, 30, -30);
+            // scribble.scribbleCurve(-15, 20, 0, -30, -35, 5, -30, -30);
+            // scribble.scribbleCurve(0, 20, 0, -30, -30, 0, -50, -40);
+        }
+        pop();
+
+        if(this.type==Pieces.BISHOP){
+            push();
+            // scale(1/10, 1/10)
+            textSize(4)
+            fill(COLORS.PURPLE)
+            for(let a = -8; a < 8; a++){
+                let y = this.y + a;
+                let x1 = this.x + a;
+                let x2 = this.x - a;
+                let coords = toBoard(mouseX, mouseY);
+                if(y>=0 && y<=7 && (x1>=0 && x1<=7 || x2>=0 && x2<=7) && this.x==floor(coords[0]) && this.y==floor(coords[1])){
+                    // text(valuePlaceDiagonal(x1, y, this), x1 * 10, y * 10);
+                    // text(valuePlaceDiagonal(x2, y, this), x2 * 10, y * 10);
+                    // text(valuePlaceCross(x1, this.y), x1 * 10, this.y * 10);
+                }
+            }
+            pop();
+        }
+    }
+
+    move(x: number, y: number){
+        this.gotoX = x;
+        this.gotoY = y;
+        this.fromX = this.x;
+        this.fromY = this.y;
+        this.moving = true;
+        this.moveTime = Date.now();
+        move.play();
+
+        if(this.type==Pieces.KING){
+            for(let i = 0; i < pieces.length; i++){
+                if(pieces[i].x==x && pieces[i].y==y){
+                    pieces.splice(i, 1);
+                    if(pieces.length==1){
+                        cycles+=cyclesNeeded-1;
+                    }
+                }
+            }
+        }
+    }
+}
+
+let lastMessage, messageTime;
+
+let pieces = [
+];
+
+let piece: Piece;
+
+function reset(){
+    gameState = 0;
+    lastPlayed = null;
+    lastMessage = null;
+    messageTime = null;
+    cycles = 0;
+    cyclesNeeded = 7;
+    botMoved = false;
+    turn = 0;
+    moves = 0;
+    pieces = [
+        // new Piece(Pieces.BISHOP, 3, 4),
+        new Piece(Pieces.BISHOP, 3, 4),
+        new Piece(Pieces.BISHOP, 4, 4),
+        new Piece(Pieces.BISHOP, 5, 4),
+    ];
+    
+    piece = new Piece(Pieces.KING, 1, 1);
+}
+reset();
+
+function isDiagonal(x1, y1, x2, y2){
+    return abs(x1-x2)==abs(y1-y2);
+}
+
+function isCross(x1, y1, x2, y2){
+    return x1==x2 || y1==y2;
+}
+
+function isAdjacent8(x1, y1, x2, y2){
+    return abs(x1-x2)<=1 && abs(y1-y2)<=1;
+}
+
+function valuePlaceCross(x, y){
+    if(isAdjacent8(piece.x, piece.y, x, y)) return -1;
+
+    if(isCross(piece.x, piece.y, x, y)){
+        return 100;
+    }
+
+    let defenses = 0;
+    for(let ly = -1; ly <= 1; ly++){
+        for(let lx = -1; lx <= 1; lx++){
+            if(isCross(piece.x+lx, piece.y+ly, x, y)){
+                defenses += 10;
+            }
+        }
+    }
+    if(defenses>0){
+        return defenses;
+    }
+
+    return 0;
+}
+
+function valuePlaceDiagonal(x, y, owner: Piece){
+    if(isAdjacent8(piece.x, piece.y, x, y)) return -1;
+
+    if(isDiagonal(piece.x, piece.y, x, y)){
+        return 100;
+    }
+
+    let defenses = 0;
+    for(let ly = -1; ly <= 1; ly++){
+        for(let lx = -1; lx <= 1; lx++){
+            if(isDiagonal(piece.x+lx, piece.y+ly, x, y)){
+                // console.log(sqrt((pow(piece.x+lx - x, 2) + pow(piece.y+ly - y, 2))))
+
+                defenses += 10 - someoneDefending(piece.x+lx, piece.y+ly, owner) * 5 + random(-5,5);
+            }
+        }
+    }
+    if(defenses>0){
+        return defenses;
+    }
+
+    return 0;
+}
+
+function someoneDefending(x: number, y: number, expect: Piece){
+    let defenses = 0;
+    for(let i = 0; i < pieces.length; i++){
+        if(expect!=piece[i] && isDiagonal(x, y, pieces[i].x, pieces[i].y)){
+            defenses++;
+        }
+    }
+    return defenses;
+}
+
+function checkCheckmate(){
+    for(let ly = -1; ly <= 1; ly++){
+        for(let lx = -1; lx <= 1; lx++){
+            const x = piece.x + lx;
+            const y = piece.y + ly;
+            if(!(x==piece.x && y==piece.y) && x>=0 && y>=0 && x<=7 && y<=7){
+                let attacking_cell = false;
+                for(let i = 0; i < pieces.length; i++){
+                    if(isDiagonal(x, y, pieces[i].x, pieces[i].y)){
+                        attacking_cell = true;
+                        continue;
+                    }
+                }
+                if(!attacking_cell){
+                    return false;
+                }
+            }
+        }
+    }
+
+    message("Checkmate!");
+    return true;
+}
+
+function checkLose(){
+    if(checkCheckmate()){
+        return true;
+    }
+    
+    for(let i = 0; i < pieces.length; i++){
+        if(isDiagonal(pieces[i].x, pieces[i].y, piece.x, piece.y)){
+            message("Checkmate!")
+            return true;
+        }
+    }
+}
+
 function setup(){
     createCanvas(windowWidth, windowHeight);
     textFont(font);
-    // createCanvas(windowWidth, windowHeight, WEBGL);
-    // smooth()
-    // g = createGraphics(windowWidth, windowHeight, p5.Renderer);
-
-    positions = [
-        // createVector(0, -1),
-        // createVector(0, 1),
-        // createVector(1, -1),
-        // createVector(1, 1),
-        // createVector(-1, -1),
-        // createVector(0, .6),
-        // createVector(0, -.6),
-        // createVector(.6, 0),
-        // createVector(-.6, 0),
-    ]
-
-    for(let alpha = 0; alpha < PI * 2; alpha += radians(45)){
-        positions.push(createVector(cos(alpha), sin(alpha)));
-        // create_person();
-    }
-
-    // for(let i = 0; i < 10; i++){
-    //     while(true){
-    //         let pos = createVector(floor(random(-2, 2)), floor(random(-2, 2)));
-
-    //         if(!positions.find((a) => a.x==pos.x && a.y==pos.y)){
-    //             positions.push(pos);
-
-    //             // let person = new Person(pos.x/3, pos.y/3);
-    //             // person.interests.push(Interest.CIRCLE);
-    //             // person.interests.push(Interest.SQUARE);
-    //             // persons.push(person);
-
-    //             break;
-    //         }
-    //     }
-    // }
-
-    create_person();
-    create_person();
+    // scribble.roughness = .2;
+    // frameRate(10)
 };
 
-function create_person(){
-    let pos = positions.pop();
-    let person = new Person(pos.x/2, pos.y/2);
-    while(person.interests.length!=2){
-        let interest = random_interest();
-        if(!person.has_interest(interest)){
-            person.interests.push(interest);
-            interests.set(interest, interests.has(interest) ? interests.get(interest)+1 : 1);
-        }
-    }
-    // person.interests.push(Interest.CIRCLE);
-    // person.interests.push(Interest.DIAMOND);
-    persons.push(person);
+function get_scale() {
+    return screen_size / 1000;
 }
 
-function draw_relations(){
-    let strk = 15 * get_scale()
-    // for(let relation of relations){
-    let changed: Relation;
-    relations = relations.filter((relation)=>{
-        let apos = relation.a.get_absolute_position();
-        let bpos = relation.b.get_absolute_position();
-        let clr = lerpColor(lerpColor(color(COLORS.RED), color(COLORS.YELLOW), relation.quality), color(COLORS.GREEN), relation.quality);
-
-        // let delta = apos.add(bpos.sub(apos).div(2));
-        let delta = p5.Vector.sub(bpos, apos);
-        let mag = delta.mag();
-
-        let dot = ( ((mouseX-apos.x)*(bpos.x-apos.x)) + ((mouseY-apos.y)*(bpos.y-apos.y)) ) / pow(mag,2);
-
-        let closest = p5.Vector.add(apos, delta.mult(clamp(dot, 0, 1)));
-        // circle(closest.x, closest.y, 10);
-
-        let colliding = pow(closest.x-mouseX, 2) + pow(closest.y-mouseY, 2) <= pow(1 + strk, 2);
-        if(colliding && !relation.harmed){
-            if(deleting_relations){
-                rip.play();
-                relation.destroy();
-                changed = relation;
-                return false;
-            }
-            clr.setAlpha(100);
-        }
-
-        let scl = get_scale();
-        if(relation.harmed){
-            drawingContext.setLineDash([10*scl, 30*scl]);
-            clr.setAlpha(pow(sin(Date.now()/100), 2)*200);
-        }else{
-            drawingContext.setLineDash([]);
-        }
-
-        stroke(COLORS.BLACK);
-        strokeWeight(strk*1.5);
-        line(apos.x, apos.y, bpos.x, bpos.y);
-
-        strokeWeight(strk);
-        stroke(clr);
-        line(apos.x, apos.y, bpos.x, bpos.y);
-        drawingContext.setLineDash([]);
-
-        if(relation.harmed && Date.now()-relation.harm_timestamp>5000){
-            relation.destroy();
-            return false;
-        }
-
-        return true;
-    });
-
-    if(changed){
-        changed.a.evaluate_happiness();
-        changed.b.evaluate_happiness();
+function isOcuppied(x, y){
+    for(let i = 0; i < pieces.length; i++){
+        if(pieces[i].x==x && pieces[i].y==y) return true;
     }
+    return false;
 }
 
-function draw_converations_feedback(){
-    for(let relation of relations){
-        push();
-        relation.conversation_stack = relation.conversation_stack.filter((conversation) => {
-            let alpha = (Date.now()-conversation.timestamp)/500;
 
-            // Hacky code warning
-            let apos = conversation.conversation.relation.a.get_absolute_position();
-            let bpos = conversation.conversation.relation.b.get_absolute_position();
-
-            let scl = get_scale();
-
-            push();
-            let delta = p5.Vector.sub(bpos, apos);
-            let pos = p5.Vector.add(apos, delta.div(delta.mag()).mult(45 * scl));
-            translate(pos.x, pos.y);
-
-            scale(scl*1.3, scl*1.3);
-            strokeWeight(3 * get_scale());
-            stroke(COLORS.BLACK[0]);
-            if(conversation.conversation.a_liked){
-                fill(COLORS.GREEN);
-            }else{
-                rotate(PI);
-                fill(COLORS.RED);
-            }
-            triangle(0, -10, 10, 10, -10, 10);
-            pop();
-
-            push();
-            delta = p5.Vector.sub(apos, bpos);
-            pos = p5.Vector.add(bpos, delta.div(delta.mag()).mult(45 * scl));
-            translate(pos.x, pos.y);
-
-            scale(scl*1.3, scl*1.3);
-            strokeWeight(3 * get_scale());
-            stroke(COLORS.BLACK[0]);
-            if(conversation.conversation.b_liked){
-                fill(COLORS.GREEN);
-            }else{
-                rotate(PI);
-                fill(COLORS.RED);
-            }
-            triangle(0, -10, 10, 10, -10, 10);
-            pop();
-
-            return alpha<1;
-        });
-        pop();
-    }
-}
-
-let relation_index = 0;
-let cycle_count = 0;
-
-function cycle(){
-    persons.forEach((person)=>person.cycle());
-
-    cycle_count++;
-
-    if(cycle_count%10==0 && positions.length>0){
-        appear.play();
-        create_person();
-    }
-
-    if(relation_index>relations.length-1){
-        relation_index = 0;
-    }
-
-    if(relations.length>0){
-        let relation = relations[relation_index];
-
-        let conversation = new Conversation(relation);
-
-        let a_topic = relation.a.interests[floor(random(0, relation.a.interests.length))];
-        let b_topic = relation.b.interests[floor(random(0, relation.b.interests.length))];
-
-        conversation.a_liked = relation.a.has_interest(b_topic);
-        conversation.b_liked = relation.b.has_interest(a_topic);
-        // relation.b.hear_topic(relation.a, relation, a_topic);
-        // relation.a.hear_topic(relation.b, relation, b_topic);
-
-        conversation.a_topic = a_topic;
-        conversation.b_topic = b_topic;
-        conversations.push(conversation);
-        relation_index++;
-
-        if(relation.quality<=0 && !relation.harmed){
-            relation.harmed = true;
-            relation.harm_timestamp = Date.now();
-            relation.destroy();
-            // relations = relations.filter((rel)=>relation!=rel);
-            relation.a.evaluate_happiness();
-            relation.b.evaluate_happiness();
-        }
-    }
-}
-
-let cycle_time;
 function update(){
-    // cycle_time = song.currentTime() 
-
-    let threshold = map(clamp(cycle_count, 30, 150), 30, 150, 1500, 500);
-
-    let count = 0;
-    persons.forEach((person)=>{
-        if(!person.dead) count++;
-    });
-
-    song.rate(map(count/persons.length, 0, 1, .8, 1));
-
-    if((!cycle_time || cycle_time>threshold) && relations.length>0){
-        // console.log(map(clamp(cycle_count, 50, 150), 50, 150, 1500, 500))
-        if(!cycle_time) cycle_time = threshold;
-        cycle_time -= threshold;
-        cycle();
+    updateTime += deltaTime;
+    if(updateTime>250) {
+        updateTime = 0;
+        fun -= 2;
+        fun = max(0, fun);
     }
-    cycle_time += deltaTime;
+
+    scribble.roughness = 1 + max(pieces.length - 3, 0) * .5;
+    // console.log(1 + min(pieces.length - 3, 0))
+
+    if(gameState!=2){
+        if(turn==1){
+            if(!piece.moving){
+                if(!botMoved){
+                    if(checkLose()){
+                        gameState = 2; // lose
+                        return;
+                    }
+
+                    if(cycles>=cyclesNeeded){
+                        cyclesNeeded += 2;
+                        cycles = 0;
+                        let distance, cell;
+                        for(let x = 0; x <= 7; x++){
+                            for(let y = 0; y <= 7; y++){
+                                const dist = sqrt(pow(x - piece.x, 2) + pow(x - piece.x, 2));
+                                if(!isOcuppied(x, y) && (distance==undefined || dist>distance)){
+                                    distance = dist;
+                                    cell = [x, y];
+                                }
+                            }
+                        }
+
+                        if(cell){
+                            pieces.push(new Piece(Pieces.BISHOP, cell[0], cell[1]));
+                        }
+                    }
+
+                    botMoved = true;
+                    botMove();
+                }
+                
+                let static = true;
+                for(let i = 0; i < pieces.length; i++){
+                    if(pieces[i].moving){
+                        static = false;
+                    }
+                }
+                
+                if(static){
+                    botMoved = false;
+                    turn = 0;
+
+                    for(let i = 0; i < pieces.length; i++){
+                        if(isDiagonal(pieces[i].x, pieces[i].y, piece.x, piece.y)){
+                            check.play();
+                            message("Check");
+                            break;
+                        }
+                    }
+
+                    if(checkCheckmate()){
+                        gameState = 2; // lose
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+function message(text){
+    lastMessage = text;
+    messageTime = Date.now();
 }
 
 function draw(){
-    update();
-    // console.log("asd")
-    // clear();
-    // rect(sin(Date.now())*100, 0, 100, 100);
-    background(200);
+    update()
 
+    textAlign(CENTER, CENTER);
+
+    randomSeed(Date.now() / 100);
+    // update();
+    // // console.log("asd")
+    // // clear();
+    // // rect(sin(Date.now())*100, 0, 100, 100);
+    background(200);
+    // stroke(COLORS.RED);
+    // scribble.scribbleLine(0, 0, 100, 100);
+    
     let scl = get_scale();
 
     push();
     noStroke();
-    fill(100, 100, 100);
     screen_size = min(windowWidth, windowHeight);
+    fill(50, 50, 50);
     translate(-screen_size/2, -screen_size/2)
     translate(windowWidth/2, windowHeight/2)
     // rect(0, 0, screen_size, screen_size)
@@ -743,157 +596,270 @@ function draw(){
     textSize(scl*100);
     pop();
 
-    
-    // for(let i = -1; i <= 1; i++){
-    let density = 100;
-    for(let i = -ceil(width / scl / density); i <= ceil(width / scl / density); i++){
-        stroke(COLORS.BLACK);
-        strokeWeight(5*scl);
-        line(i * density * scl + width/2, 0, i * density * scl + width/2, height);
-    }
-
-    for(let i = -ceil(height / scl / density); i <= ceil(height / scl / density); i++){
-        stroke(COLORS.BLACK);
-        strokeWeight(5*scl);
-        line(0, i * density * scl + height/2, width, i * density * scl + height/2);
-    }
-
-    // noFill();
-    textFont(font)
-    strokeWeight(scl*15);
-    textAlign(CENTER);
-    stroke(COLORS.BLACK);
-    fill(COLORS.WHITE);
-    textSize(scl*100);
-    text(score, width/2, 100*scl);
-
-    // text("Connect the lonely people", width/2, 100*scl);
-    noStroke();
-    fill(COLORS.BLACK);
-
-    draw_relations();
-
-    conversations = conversations.filter((conversation)=>{
-        let keep = conversation.render();
-        if(!conversation.flushed && conversation.get_alpha()>.8){
-            conversation.flushed = true;
-
-            let delta = 0;
-            if(conversation.a_liked && conversation.b_liked){
-                score++;
-                delta++;
-                nice.play(0, 1);
-            }else{
-                nice.play(0, .7);
-            }
-
-            if(!conversation.a_liked && !conversation.b_liked){
-                delta-=2;
-            }else{
-                if(!conversation.a_liked || !conversation.b_liked){
-                    delta--;
-                }
-            }
-            conversation.relation.quality += delta * (map(clamp(cycle_count, 100, 200), 100, 200, .2, .7));
-            conversation.relation.quality = max(min(1, conversation.relation.quality), 0);
-
-            conversation.relation.conversation_stack.push({conversation: conversation, timestamp: Date.now()});
-        }
-        return keep;
-    });
-
-    // console.log(conversations.length);
-
-    if(selected_person){
-        stroke(COLORS.BLACK);
-        let position = selected_person.get_absolute_position();
-        line(position.x, position.y, mouseX, mouseY);
-    }
-    
+    let board_size = 10*5*8;
     push();
-    // translate(width/2, height/2);
-    // scale(screen_size*.001, screen_size*.001);
-
-    persons.forEach((person)=>person.draw());
-    pop();
-
-    draw_converations_feedback();
-
-    stroke(COLORS.BLACK);
-    fill(COLORS.WHITE);
-    push();
-    textAlign(CENTER, BOTTOM);
-    translate(-screen_size/2, -screen_size/2)
+    strokeWeight(scl*.5)
     translate(windowWidth/2, windowHeight/2)
-    textFont(font2)
-    strokeWeight(scl*10);
+    translate(-screen_size/2, -screen_size/2)
+    // translate(scl*10*5*8/4,scl*10*5*8/4)
+    let mouseLX = toBoard(mouseX, mouseY);
+    let mouseLY = toBoard(mouseX, mouseY);
+    scale(scl*10)
+    translate(10, 10);
+    translate(5, 5)
 
-    let alive = false;
-    for(let person of persons){
-        if(!person.dead) alive = true;
-    }
+    push();
+    for(let y = 0; y < 8; y++){
+        push();
+        for(let x = 0; x < 8; x++){
+            fill(x%2==y%2 ? color(149, 175, 192) : color(83, 92, 104));
+            // fill(x%2==y%2 ? color(126, 214, 223) : color(34, 166, 179));
+            
+            // if(mouseLX[0]>=x && mouseLY[1]>=y){
+            //     fill(COLORS.YELLOW);
+            // }
 
-    if(!alive){
-        text("Solitude took all the souls", 0, 0, screen_size, screen_size * .9);
+            noStroke()
+            // scribble.scribbleFilling([-5, 5, 5, -5], [-5, -5, 5, 5], 1, 215);
+            // scribble.scribbleRect(0, 0, 10, 10);
+            push()
+            translate(scribble.getOffset(-.1, .1), scribble.getOffset(-.1, .1))
+            rect(-5, -5, 10, 10)
+            pop()
+            translate(10, 0);
+        }
+        pop();
+        translate(0, 10);
     }
-
-    if(cycle_count==0){
-        text("Join the lonely souls", 0, 0, screen_size, screen_size * .9);
-    }
+    
+    // console.log(mouseX)
     pop();
+
+
+
+    piece.draw();
+    pieces.forEach((e)=>e.draw())
+
+    push();
+    translate((3.5) * 10, -11);
+    scale(1/10, 1/10)
+    stroke(COLORS.WHITE);
+    noFill();
+    strokeWeight(scl*7)
+    textSize(scl*80);
+    push()
+    translate(scribble.getOffset(-1, 1), scribble.getOffset(-1, 1));
+    text(moves+" moves", 0, 0)
+    pop();
+    noStroke();
+    fill(COLORS.BLACK)
+    translate(scribble.getOffset(-1,1), scribble.getOffset(-1, 1));
+    text(moves+" moves", 0, 0)
+    pop();
+
+    if(lastMessage){
+        push();
+        let a = (min((Date.now()-messageTime)/1500, 1));
+        let alpha = lastMessage=="Checkmate!" ? a : sin(PI * a);
+        translate((3.5) * 10, (3.5) * 10);
+        if(lastMessage=="Checkmate!"){
+            stroke(COLORS.RED[0], COLORS.RED[1], COLORS.RED[2], alpha*255)
+        }else{
+            stroke(COLORS.ORANGE[0], COLORS.ORANGE[1], COLORS.ORANGE[2], alpha*255)
+        }
+        scribble.scribbleFilling([-40, 40, 40, -40], [-10, -10, 10, 10], 1.5, 315);
+        scale(alpha, alpha)
+        scale(1/10, 1/10)
+        stroke(COLORS.WHITE);
+        noFill();
+        strokeWeight(scl*7)
+        textSize(scl*100);
+        if(lastMessage=="Checkmate!"){
+            translate(0, -35)
+        }
+        push()
+        translate(scribble.getOffset(-1, 1), scribble.getOffset(-1, 1));
+        text(lastMessage, 0, 0)
+        if(lastMessage=="Checkmate!"){
+            textSize(scl*50);
+            text("Click/tap to restart", 0, 80)
+            textSize(scl*100);
+        }
+        pop();
+        noStroke();
+        fill(COLORS.BLACK)
+        translate(scribble.getOffset(-1,1), scribble.getOffset(-1, 1));
+        text(lastMessage, 0, 0)
+        if(lastMessage=="Checkmate!"){
+            textSize(scl*50);
+            text("Click/tap to restart", 0, 80)
+        }
+        pop();
+        if(a==1 && lastMessage!="Checkmate!"){
+            lastMessage = undefined;
+            messageTime = undefined;
+        }
+    }
+
+    if(gameState==0){
+        push();
+        translate((4) * 10, (1) * 10);
+        scale(1/10, 1/10)
+        stroke(COLORS.WHITE);
+        strokeWeight(get_scale() * 13)
+        scribble.scribbleLine(0, 0, -100, 0);
+        scribble.scribbleLine(-100, 0, -80, 20);
+        scribble.scribbleLine(-100, 0, -80, -20);
+        push()
+        strokeWeight(get_scale() * 10)
+        strokeJoin(BEVEL);
+        fill(COLORS.WHITE)
+        textSize(scl*50);
+        translate(scribble.getOffset(-1, 1), scribble.getOffset(-1, 1));
+        text("You", 80, 0)
+        pop()
+        stroke(COLORS.BLACK);
+        strokeWeight(get_scale() * 5)
+        scribble.scribbleLine(0, 0, -100, 0);
+        scribble.scribbleLine(-100, 0, -80, 20);
+        scribble.scribbleLine(-100, 0, -80, -20);
+        textSize(scl*50);
+        translate(scribble.getOffset(-1, 1), scribble.getOffset(-1, 1));
+        noStroke();
+        fill(COLORS.BLACK)
+        text("You", 80, 0)
+        pop()
+
+        push();
+        translate((4.5) * 10, (5) * 10);
+        scale(1/10, 1/10)
+        stroke(COLORS.WHITE);
+        strokeWeight(get_scale() * 13)
+        scribble.scribbleLine(0, 0, -50, 50);
+        scribble.scribbleLine(0, 0, 0, 20);
+        scribble.scribbleLine(0, 0, -20, 0);
+        push()
+        strokeWeight(get_scale() * 10)
+        strokeJoin(BEVEL);
+        fill(COLORS.WHITE)
+        textSize(scl*50);
+        translate(scribble.getOffset(-1, 1), scribble.getOffset(-1, 1));
+        text("Bishop Patrol", -200, 60)
+        pop()
+        stroke(COLORS.BLACK);
+        strokeWeight(get_scale() * 5)
+        scribble.scribbleLine(0, 0, -50, 50);
+        scribble.scribbleLine(0, 0, 0, 20);
+        scribble.scribbleLine(0, 0, -20, 0);
+        textSize(scl*50);
+        translate(scribble.getOffset(-1, 1), scribble.getOffset(-1, 1));
+        noStroke();
+        fill(COLORS.BLACK)
+        text("Bishop Patrol", -200, 60)
+        pop()
+    }
+
+    translate(5 * 4, 4)
+    // text("Check!", 0, 0)
+    pop();
+
+
+
+    if(mouseIsPressed){
+        draw_stack[draw_stack.length-1] = [mouseX, mouseY];
+    }
+
+    if(gameState==2 && (intro.isPlaying() || song.isPlaying())){
+        song.stop();
+        intro.stop()
+        checkmate.play()
+    }
 }
 
-window.mousePressed = function(){
+function botMove(){
+    let leastScore: number, leastPiece: Piece;
+    for(let i = 0; i < pieces.length; i ++){
+        const value = pieces[i].value()
+        if((leastScore==undefined || value<leastScore) && pieces[i].consecutive<3){
+            leastScore = value;
+            leastPiece = pieces[i];
+        }
+    }
+
+    let bestCell = leastPiece.bestCell();
+    if(lastPlayed && lastPlayed!=leastPiece){
+        lastPlayed.consecutive = 0;
+    }
+    lastPlayed = leastPiece;
+    leastPiece.consecutive++;
+    leastPiece.move(bestCell[0], bestCell[1]);
+}
+
+// window.mousePressed = function(){
+// }
+
+window.mousePressed = function(e: MouseEvent){
+    if(gameState!=2 && turn==0){
+        let coords = toBoard(mouseX, mouseY);
+        let x = floor(coords[0]);
+        let y = floor(coords[1]);
+
+        if(x>=0 && x<=7 && y>=0 && y<=7){
+            let dx = abs(piece.x-x)
+            let dy = abs(piece.y-y);
+            if(!(dx==0 && dy==0) && dx<=1 && dy<=1){
+                piece.move(x, y);
+                turn = 1;
+                moves++;
+                cycles++;
+                if(!song.isPlaying() && !intro.isPlaying()){
+                    intro.play();
+                }
+                if(gameState==0) gameState=1;
+            }
+        }
+    }
+
+    if(gameState==2){
+        reset();
+    }
 }
 
 window.windowResized = function(){
     resizeCanvas(windowWidth, windowHeight);
 }
 
-// function touchStarted(){
-//     console.log("started")
+// window.mousePressed = function() {
+//     for(const person of persons) {
+//         if(person.collides(mouseX, mouseY)){
+//             selected_person = person;
+//             plop.play();
+//             return;
+//         }
+//     }
+
+//     deleting_relations = true;
 // }
-// function mousePressed(){
-//     console.log("asd")
-//     // return 
+
+// window.touchStarted = window.mousePressed;
+
+// window.mouseReleased = function() {
+//     deleting_relations = false;
+
+//     if(selected_person){
+//         for(const person of persons) {
+//             if(person.collides(mouseX, mouseY) && person!=selected_person && !person.has_relation(selected_person)){
+//                 create_relation(person, selected_person);
+//                 if(!song.isPlaying()){
+//                     song.play();
+//                 }
+//                 pling.play();
+//                 break;
+//             }
+//         }
+//         plop.play();
+//         selected_person = undefined;
+//     }
 // }
 
-window.mousePressed = function() {
-    for(const person of persons) {
-        if(person.collides(mouseX, mouseY)){
-            selected_person = person;
-            plop.play();
-            return;
-        }
-    }
-
-    deleting_relations = true;
-}
-
-window.touchStarted = window.mousePressed;
-
-window.mouseReleased = function() {
-    deleting_relations = false;
-
-    if(selected_person){
-        for(const person of persons) {
-            if(person.collides(mouseX, mouseY) && person!=selected_person && !person.has_relation(selected_person)){
-                create_relation(person, selected_person);
-                if(!song.isPlaying()){
-                    song.play();
-                }
-                pling.play();
-                break;
-            }
-        }
-        plop.play();
-        selected_person = undefined;
-    }
-}
-
-window.touchEnded = window.mouseReleased;
-
-// window.touchStarted = function() {
-    
-//     console.log("tap")
-// }
+// window.touchEnded = window.mouseReleased;
