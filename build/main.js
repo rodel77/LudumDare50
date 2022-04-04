@@ -301,6 +301,8 @@ function reset() {
 }
 reset();
 function isDiagonal(x1, y1, x2, y2) {
+    if (x1 == x2 && y1 == y2)
+        return false;
     return abs(x1 - x2) == abs(y1 - y2);
 }
 function isCross(x1, y1, x2, y2) {
@@ -428,8 +430,26 @@ function update() {
                         cyclesNeeded += 2;
                         cycles = 0;
                         let distance, cell;
+                        let light = 0;
+                        let dark = 0;
+                        for (let i = 0; i < pieces.length; i++) {
+                            if (pieces[i].x % 2 == pieces[i].y % 2) {
+                                light++;
+                            }
+                            else {
+                                dark++;
+                            }
+                        }
                         for (let x = 0; x <= 7; x++) {
                             for (let y = 0; y <= 7; y++) {
+                                if (x % 2 == y % 2) {
+                                    if (light > dark)
+                                        continue;
+                                }
+                                else {
+                                    if (dark > light)
+                                        continue;
+                                }
                                 const dist = sqrt(pow(x - piece.x, 2) + pow(x - piece.x, 2));
                                 if (!isOcuppied(x, y) && (distance == undefined || dist > distance)) {
                                     distance = dist;
